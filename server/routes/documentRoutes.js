@@ -1,9 +1,9 @@
 const express = require('express');
-const { getDocument, createDocument } = require('../controllers/documentController');
+const documentController = require('../controllers/documentController');
 
 const router = express.Router();
 
-router.post('/', createDocument);
-router.get('/:id', getDocument);
+router.post('/', (req, res) => documentController.createDocument(req, res));
+router.get('/:id', (req, res) => documentController.getDocument(req, res));
 
 module.exports = router;

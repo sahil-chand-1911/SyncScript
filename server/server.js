@@ -4,42 +4,60 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const connectDB = require('./config/db');
+const DatabaseConnection = require('./config/db');
 const documentRoutes = require('./routes/documentRoutes');
 const setupSockets = require('./sockets/documentSocket');
 
-// Initialize app
-const app = express();
-const server = http.createServer(app);
+class AppServer {
+  constructor() {
+    this.app = express();
+    this.server = http.createServer(this.app);
+    this.io = new Server(this.server, {
+      cors: {
+        origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+        methods: ['GET', 'POST']
+      }
+    });
+    this.port = process.env.PORT || 5001;
 
-// Connect to MongoDB
-connectDB();
-
-// Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  methods: ['GET', 'POST']
-}));
-app.use(express.json());
-
-// Routes
-app.use('/api/documents', documentRoutes);
-
-app.get('/', (req, res) => {
-  res.send('SyncScript API is running...');
-});
-
-// Setup Socket.IO
-const io = new Server(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST']
+    this.initializeDependencies();
+    this.initializeMiddleware();
+    this.initializeRoutes();
+    this.initializeSockets();
   }
-});
-setupSockets(io);
 
-// Start Server
-const PORT = process.env.PORT || 5001;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+  async initializeDependencies() {
+    // Uses the Singleton db
+    await DatabaseConnection.connect();
+  }
+
+  initializeMiddleware() {
+    this.app.use(cors({
+      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+      methods: ['GET', 'POST']
+    }));
+    this.app.use(express.json());
+  }
+
+  initializeRoutes() {
+    this.app.use('/api/documents', documentRoutes);
+
+    this.app.get('/', (req, res) => {
+      res.send('SyncScript API is running...');
+    });
+  }
+
+  initializeSockets() {
+    setupSockets(this.io);
+  }
+
+  start() {
+    this.server.listen(this.port, () => {
+      console.log(`AppServer running on port ${this.port}`);
+    });
+  }
+}
+
+// Bootstrap
+const bootServer = new AppServer();
+bootServer.start();

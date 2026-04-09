@@ -1,96 +1,104 @@
 const Document = require('../models/Document');
-const { catchUpOperation, applyOperation } = require('../utils/ot');
+const OTContext = require('../utils/ot');
+const DocumentManager = require('../services/DocumentSubject');
 
-// In-memory store for operations history (per documentId)
-const documentHistories = {};
+class SocketManager {
+  constructor(io) {
+    this.io = io;
+    this.activeSockets = new Map(); // Keep track of which room a socket is in
+    
+    this.io.on('connection', (socket) => this.handleConnection(socket));
+  }
 
-const setupSockets = (io) => {
-  io.on('connection', (socket) => {
+  handleConnection(socket) {
     console.log('User connected:', socket.id);
 
-    // Join a document room explicitly
     socket.on('join-document', async (documentId) => {
-      // Leave any existing rooms before joining a new one
-      socket.rooms.forEach((room) => {
-        if (room !== socket.id) {
-          socket.leave(room);
-          socket.to(room).emit('user-left', socket.id);
-        }
-      });
-
-      socket.join(documentId);
-      
-      let document = await Document.findOne({ documentId });
-      
-      if (!document) {
-        document = await Document.create({ documentId, data: '', version: 1 });
-      }
-
-      if (!documentHistories[documentId]) {
-        documentHistories[documentId] = [];
-      }
-
-      // Notify others in room
-      socket.to(documentId).emit('user-joined', socket.id);
-
-      // Give client initial data and current server version
-      socket.emit('load-document', { content: document.data, version: document.version });
+      this.handleJoinDocument(socket, documentId);
     });
 
-    // Handle leaving manually if needed
     socket.on('leave-document', (documentId) => {
-      socket.leave(documentId);
-      socket.to(documentId).emit('user-left', socket.id);
+      this.handleLeaveDocument(socket, documentId);
     });
 
-    // Handle incoming Operational Transformation
     socket.on('send-operation', async (data) => {
-      const { documentId, operation } = data;
-      // operation: { type, position, character, version }
-
-      if (!documentHistories[documentId]) {
-        documentHistories[documentId] = [];
-      }
-
-      const history = documentHistories[documentId];
-      
-      // Catch up the operation based on server history to resolve conflicts locally
-      const transformedOp = catchUpOperation(operation, history);
-
-      if (transformedOp) {
-        // Find current document from DB (or we could cache it in RAM for speed, but MongoDB is fine for MVP)
-        const document = await Document.findOne({ documentId });
-        
-        if (document) {
-          // Increment version and attach to transformedOp
-          const nextVersion = document.version + 1;
-          transformedOp.version = nextVersion;
-
-          // Apply to text
-          const newContent = applyOperation(document.data, transformedOp);
-
-          // Update DB
-          await Document.findOneAndUpdate(
-            { documentId }, 
-            { data: newContent, version: nextVersion }
-          );
-
-          // Push to history
-          history.push(transformedOp);
-
-          // Acknowledge the sender so they know to increment their baseline version
-          socket.emit('operation-acknowledged', nextVersion);
-
-          // Broadcast the transformed operation cleanly to other clients
-          socket.broadcast.to(documentId).emit('receive-operation', transformedOp);
-        }
-      }
+      this.handleSendOperation(socket, data);
     });
 
     socket.on('disconnect', () => {
       console.log('User disconnected:', socket.id);
+      const currentDocId = this.activeSockets.get(socket.id);
+      if (currentDocId) {
+        this.handleLeaveDocument(socket, currentDocId);
+      }
+      this.activeSockets.delete(socket.id);
     });
-  });
-};
+  }
+
+  async handleJoinDocument(socket, documentId) {
+    const previousDocId = this.activeSockets.get(socket.id);
+    
+    if (previousDocId && previousDocId !== documentId) {
+      this.handleLeaveDocument(socket, previousDocId);
+    }
+
+    // Subscribe via Observer Subject
+    const subject = DocumentManager.getSubject(documentId);
+    subject.subscribe(socket);
+    
+    this.activeSockets.set(socket.id, documentId);
+    socket.join(documentId); // We still use native channels to group traffic natively
+
+    let document = await Document.findOne({ documentId });
+    if (!document) {
+      document = await Document.create({ documentId, data: '', version: 1 });
+    }
+
+    // Direct initial payload
+    socket.emit('load-document', { content: document.data, version: document.version });
+  }
+
+  handleLeaveDocument(socket, documentId) {
+    const subject = DocumentManager.getSubject(documentId);
+    subject.unsubscribe(socket);
+    socket.leave(documentId);
+    this.activeSockets.delete(socket.id);
+  }
+
+  async handleSendOperation(socket, data) {
+    const { documentId, operation } = data;
+    const subject = DocumentManager.getSubject(documentId);
+    const history = subject.getHistory();
+
+    // Use pure Strategy Pattern Context Math
+    const transformedOp = OTContext.catchUp(operation, history);
+
+    if (transformedOp) {
+      const document = await Document.findOne({ documentId });
+      if (document) {
+        const nextVersion = document.version + 1;
+        transformedOp.version = nextVersion;
+
+        const newContent = OTContext.applyOperation(document.data, transformedOp);
+
+        await Document.findOneAndUpdate(
+          { documentId }, 
+          { data: newContent, version: nextVersion }
+        );
+
+        subject.addHistory(transformedOp);
+
+        // Notify Observer Patterns directly
+        subject.notifyDirect(socket, 'operation-acknowledged', nextVersion);
+        subject.notifyOthers(socket, 'receive-operation', transformedOp);
+      }
+    }
+  }
+}
+
+// Export initialization singleton hook
+const setupSockets = (io) => {
+  return new SocketManager(io);
+}
 
 module.exports = setupSockets;
