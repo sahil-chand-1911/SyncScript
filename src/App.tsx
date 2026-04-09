@@ -1,33 +1,50 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import './App.css'; // Minimal or basic css
+import { computeOperation, applyOperation } from './utils/otLogic';
+import './App.css'; 
 
-// Connect to backend Socket.io
 const SOCKET_SERVER_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
 function App() {
   const [content, setContent] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
   
-  // Allow user to enter Document ID
   const [documentId, setDocumentId] = useState('default-doc');
   const [activeDocId, setActiveDocId] = useState('default-doc');
 
+  const contentRef = useRef('');
+  const versionRef = useRef(1);
+
   useEffect(() => {
-    // Initialize socket connection
+    contentRef.current = content;
+  }, [content]);
+
+  useEffect(() => {
     const s = io(SOCKET_SERVER_URL);
     setSocket(s);
 
     s.on('connect', () => {
       console.log('Connected to server');
-      // Join active document room
       s.emit('join-document', activeDocId);
     });
 
     s.on('load-document', (data) => {
-      setContent(data);
+      setContent(data.content);
+      versionRef.current = data.version;
     });
 
+    s.on('receive-operation', (op) => {
+      // Apply the operation to the current local string
+      const updatedContent = applyOperation(contentRef.current, op);
+      setContent(updatedContent);
+      versionRef.current = op.version;
+    });
+
+    s.on('operation-acknowledged', (newVersion) => {
+      versionRef.current = newVersion;
+    });
+
+    // Deprecated from Phase 4, keeping standard overwrite as fail-safe if server falls back
     s.on('receive-changes', (newContent) => {
       setContent(newContent);
     });
@@ -39,22 +56,24 @@ function App() {
 
   const handleJoin = () => {
     if (documentId.trim() !== '' && documentId !== activeDocId) {
-      // Leave old doc if needed
       socket?.emit('leave-document', activeDocId);
-      
-      // Update active which triggers useEffect to rejoin
       setActiveDocId(documentId);
     }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
+    
+    // Compute OT Delta
+    const op = computeOperation(contentRef.current, newValue, versionRef.current);
+    
     setContent(newValue);
     
-    if (socket) {
+    if (socket && op) {
+      socket.emit('send-operation', { documentId: activeDocId, operation: op });
+    } else if (socket && !op) {
+      // If compute failed (complex multidiff), fallback to Phase 4 raw save
       socket.emit('send-changes', { documentId: activeDocId, content: newValue });
-      
-      // Basic autosave (you could debounce this locally for better performance)
       socket.emit('save-document', { documentId: activeDocId, content: newValue });
     }
   };
