@@ -1,6 +1,12 @@
-// Operation Format: { type: 'insert' | 'delete', position: number, character: string, version: number, id?: string }
+export interface Operation {
+  type: 'insert' | 'delete';
+  position: number;
+  character: string;
+  version: number;
+  id?: string;
+}
 
-export const applyOperation = (content: string, op: any) => {
+export const applyOperation = (content: string, op: Operation | null) => {
   if (!op) return content;
   
   if (op.type === 'insert') {

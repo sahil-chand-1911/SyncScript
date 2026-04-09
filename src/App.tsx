@@ -15,11 +15,13 @@ function App() {
   const contentRef = useRef('');
   const versionRef = useRef(1);
 
+  // Avoid cascading renders by keeping Socket initialize entirely in effect cleanly or using useRef
   useEffect(() => {
     contentRef.current = content;
   }, [content]);
 
   useEffect(() => {
+    // Only connect once securely
     const s = io(SOCKET_SERVER_URL);
     setSocket(s);
 
@@ -72,9 +74,9 @@ function App() {
     if (socket && op) {
       socket.emit('send-operation', { documentId: activeDocId, operation: op });
     } else if (socket && !op) {
-      // If compute failed (complex multidiff), fallback to Phase 4 raw save
+      // If compute failed (complex multidiff), fallback to Phase 4 raw save natively via operation
+      // For basic OT, if it fails to compute (like wiping the whole screen), we usually reset the document globally
       socket.emit('send-changes', { documentId: activeDocId, content: newValue });
-      socket.emit('save-document', { documentId: activeDocId, content: newValue });
     }
   };
 
