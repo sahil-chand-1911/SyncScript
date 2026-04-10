@@ -5,6 +5,10 @@ import './App.css';
 
 const SOCKET_SERVER_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
+/**
+ * Primary UI Component for the Collaborative Editor.
+ * Manages local state, socket connections, and OT synchronization.
+ */
 function App() {
   const [content, setContent] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -15,13 +19,23 @@ function App() {
   const contentRef = useRef('');
   const versionRef = useRef(1);
 
-  // Avoid cascading renders by keeping Socket initialize entirely in effect cleanly or using useRef
+  /**
+   * Syncs the mutable contentRef with the React content state.
+   * This is necessary because socket listeners need access to the latest content
+   * without being recreated on every render.
+   */
   useEffect(() => {
     contentRef.current = content;
   }, [content]);
 
+  /**
+   * WebSocket Connection Lifecycle:
+   * 1. Connects to the backend on mount.
+   * 2. Registers listeners for OT operations and administrative events.
+   * 3. Handles cleanup on unmount or room change.
+   */
   useEffect(() => {
-    // Only connect once securely
+    // Initialize Socket connection
     const s = io(SOCKET_SERVER_URL);
     setSocket(s);
 
@@ -30,23 +44,26 @@ function App() {
       s.emit('join-document', activeDocId);
     });
 
+    // Initial state load
     s.on('load-document', (data) => {
       setContent(data.content);
       versionRef.current = data.version;
     });
 
+    // Handle incoming operations from other clients
     s.on('receive-operation', (op) => {
-      // Apply the operation to the current local string
+      // Apply the remote operation to the local text pool
       const updatedContent = applyOperation(contentRef.current, op);
       setContent(updatedContent);
       versionRef.current = op.version;
     });
 
+    // Server acknowledgment of a locally sent operation
     s.on('operation-acknowledged', (newVersion) => {
       versionRef.current = newVersion;
     });
 
-    // Deprecated from Phase 4, keeping standard overwrite as fail-safe if server falls back
+    // Fail-safe fallback listener for full content sync
     s.on('receive-changes', (newContent) => {
       setContent(newContent);
     });
@@ -56,6 +73,10 @@ function App() {
     };
   }, [activeDocId]);
 
+  /**
+   * Room Swapping Logic:
+   * Exits the current document and joins a new one.
+   */
   const handleJoin = () => {
     if (documentId.trim() !== '' && documentId !== activeDocId) {
       socket?.emit('leave-document', activeDocId);
@@ -63,10 +84,16 @@ function App() {
     }
   };
 
+  /**
+   * Change Handler (Critical Sync Point):
+   * 1. Computes the diff (Operation) between the old and new text.
+   * 2. Updates local state immediately for responsiveness.
+   * 3. Broadcasts the Operation to the server for distribution.
+   */
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
     
-    // Compute OT Delta
+    // Compute the delta Operation
     const op = computeOperation(contentRef.current, newValue, versionRef.current);
     
     setContent(newValue);
@@ -74,8 +101,7 @@ function App() {
     if (socket && op) {
       socket.emit('send-operation', { documentId: activeDocId, operation: op });
     } else if (socket && !op) {
-      // If compute failed (complex multidiff), fallback to Phase 4 raw save natively via operation
-      // For basic OT, if it fails to compute (like wiping the whole screen), we usually reset the document globally
+      // Fallback for complex changes (e.g., massive copy-paste)
       socket.emit('send-changes', { documentId: activeDocId, content: newValue });
     }
   };

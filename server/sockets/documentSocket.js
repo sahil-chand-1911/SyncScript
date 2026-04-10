@@ -2,6 +2,10 @@ const Document = require('../models/Document');
 const OTContext = require('../utils/ot');
 const DocumentManager = require('../services/DocumentSubject');
 
+/**
+ * Manages WebSocket connections and orchestrates the synchronization flow.
+ * Acts as a bridge between Socket.io events and the OT/Observer systems.
+ */
 class SocketManager {
   constructor(io) {
     this.io = io;
@@ -10,6 +14,9 @@ class SocketManager {
     this.io.on('connection', (socket) => this.handleConnection(socket));
   }
 
+  /**
+   * Registers primary socket event listeners upon connection.
+   */
   handleConnection(socket) {
     console.log('User connected:', socket.id);
 
@@ -35,6 +42,12 @@ class SocketManager {
     });
   }
 
+  /**
+   * Handles a client joining a specific document room.
+   * Subscribes the socket to the DocumentSubject (Observer Pattern).
+   * @param {Socket} socket - The Socket.io instance.
+   * @param {string} documentId - The unique ID of the document.
+   */
   async handleJoinDocument(socket, documentId) {
     const previousDocId = this.activeSockets.get(socket.id);
     
@@ -58,6 +71,9 @@ class SocketManager {
     socket.emit('load-document', { content: document.data, version: document.version });
   }
 
+  /**
+   * Removes a client from a document room and unsubscribes them from the subject.
+   */
   handleLeaveDocument(socket, documentId) {
     const subject = DocumentManager.getSubject(documentId);
     subject.unsubscribe(socket);
@@ -65,12 +81,19 @@ class SocketManager {
     this.activeSockets.delete(socket.id);
   }
 
+  /**
+   * Processes an incoming Operational Transformation (OT) operation.
+   * 1. Fetches history from the Subject.
+   * 2. Transforms the operation against missed history (Strategy Pattern).
+   * 3. Persists the new state and history.
+   * 4. Notifies all observers (Observer Pattern).
+   */
   async handleSendOperation(socket, data) {
     const { documentId, operation } = data;
     const subject = DocumentManager.getSubject(documentId);
     const history = subject.getHistory();
 
-    // Use pure Strategy Pattern Context Math
+    // Use Strategy Pattern (OT Math) to catch up the operation
     const transformedOp = OTContext.catchUp(operation, history);
 
     if (transformedOp) {
@@ -88,7 +111,7 @@ class SocketManager {
 
         subject.addHistory(transformedOp);
 
-        // Notify Observer Patterns directly
+        // Notify Observers directly
         subject.notifyDirect(socket, 'operation-acknowledged', nextVersion);
         subject.notifyOthers(socket, 'receive-operation', transformedOp);
       }

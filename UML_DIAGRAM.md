@@ -1,34 +1,6 @@
-# SyncScript 📝
+# SyncScript - Detailed UML Class Diagram
 
-A real-time collaborative document editor built with Node.js, Express, Socket.io, MongoDB, and React.
-
-## 🚀 Overview
-SyncScript allows multiple users to edit the same document simultaneously with conflict resolution using **Operational Transformation (OT)**.
-
----
-
-## 🏗️ Architecture & Design Patterns
-
-The project follows a modular architecture utilizing several classic design patterns to ensure scalability and maintainability. For a complete technical visual, see the [Detailed UML Class Diagram](file:///Users/sahilchand/Desktop/SyncScript/UML_DIAGRAM.md).
-
-### 1. Observer Pattern
-Used for real-time synchronization between the server and multiple clients.
-- **Subject**: `DocumentSubject` (manages documentation state and history).
-- **Observer**: Individual WebSocket connections (clients).
-- **Manager**: `DocumentManager` acts as a **Subject Pool** (or Factory), ensuring that each document has exactly one subject instance in memory.
-
-### 2. Strategy Pattern
-The Operational Transformation (OT) math is encapsulated within a separate context.
-- `OTContext` encapsulates the logic for transforming operations (e.g., `catchUp`).
-- This allows the math logic to be swapped or updated without affecting the socket handling logic.
-
-### 3. Singleton Pattern
-- **Database**: The MongoDB connection is managed as a Singleton to prevent multiple redundant connections.
-- **Server Initialization**: The `AppServer` and `SocketManager` patterns ensure centralized control of the application lifecycle.
-
----
-
-## 📊 Detailed UML Class Diagram
+This document contains the visual technical architecture of the SyncScript project represented as a UML Class Diagram.
 
 ```mermaid
 classDiagram
@@ -148,43 +120,13 @@ classDiagram
 
 ---
 
-## 🔄 Data Flow
-
-1. **User Input**: A user types a character in the React frontend.
-2. **Diffing**: `computeOperation` identifies the change and creates an `insert` or `delete` operation.
-3. **Emit**: The client emits `send-operation` via Socket.io.
-4. **Transform**: The server receives the operation and uses `OTContext.catchUp` to transform it against any missed history.
-5. **Persist**: The transformed operation is applied to the MongoDB database.
-6. **Notify**: The `DocumentSubject` notifies all other "Observers" (clients) in that room with the transformed operation.
-7. **Apply**: Other clients receive the operation and call `applyOperation` to update their local text view.
-
----
-
-## 🛠️ Tech Stack
-- **Frontend**: React, TypeScript, Vite, CSS3
-- **Backend**: Node.js, Express, Socket.io
-- **Database**: MongoDB (Mongoose)
-
----
-
-## 🚦 Getting Started
-
-### Prerequisites
-- Node.js (v18+)
-- MongoDB (Running locally or via Atlas)
-
-### Installation
-1. Clone the repository.
-2. Install dependencies:
-   ```bash
-   npm install
-   cd server && npm install
-   ```
-3. Set up `.env` files in both root and `server` directories.
-4. Run the application:
-   ```bash
-   # In root
-   npm run dev
-   # In server directory
-   node server.js
-   ```
+### Legend
+| Symbol | Meaning | Description |
+|---|---|---|
+| `*--` | **Composition** | Strong ownership; the child cannot exist without the parent. |
+| `o--` | **Aggregation** | Weak ownership; a collection of objects that can exist independently. |
+| `<|--` | **Inheritance** | "Is-a" relationship (e.g., InsertStrategy is a TransformStrategy). |
+| `-->` | **Association** | "Uses" or "Has-a" relationship. |
+| `..>` | **Dependency** | Uses another class as a parameter or for a specific task. |
+| `+` | **Public** | Member is accessible from outside the class. |
+| `-` | **Private** | Member is restricted to internal class logic. |

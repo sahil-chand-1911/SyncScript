@@ -8,6 +8,10 @@ const DatabaseConnection = require('./config/db');
 const documentRoutes = require('./routes/documentRoutes');
 const setupSockets = require('./sockets/documentSocket');
 
+/**
+ * Main application server class that bootstraps the Express application,
+ * HTTP server, Socket.io, and Database connections.
+ */
 class AppServer {
   constructor() {
     this.app = express();
@@ -26,11 +30,18 @@ class AppServer {
     this.initializeSockets();
   }
 
+  /**
+   * Initializes external dependencies like the Database.
+   * Follows the Singleton pattern via DatabaseConnection.
+   */
   async initializeDependencies() {
     // Uses the Singleton db
     await DatabaseConnection.connect();
   }
 
+  /**
+   * Configures Express middleware including CORS and JSON parsing.
+   */
   initializeMiddleware() {
     this.app.use(cors({
       origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -39,6 +50,9 @@ class AppServer {
     this.app.use(express.json());
   }
 
+  /**
+   * Sets up RESTful API routes.
+   */
   initializeRoutes() {
     this.app.use('/api/documents', documentRoutes);
 
@@ -47,10 +61,16 @@ class AppServer {
     });
   }
 
+  /**
+   * Initializes WebSocket logic by passing the IO instance to the SocketManager.
+   */
   initializeSockets() {
     setupSockets(this.io);
   }
 
+  /**
+   * Starts the HTTP server on the configured port.
+   */
   start() {
     this.server.listen(this.port, () => {
       console.log(`AppServer running on port ${this.port}`);

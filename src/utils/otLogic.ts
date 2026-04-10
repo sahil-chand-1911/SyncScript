@@ -1,11 +1,20 @@
+/**
+ * Represents a single modification to a document.
+ */
 export interface Operation {
   type: 'insert' | 'delete';
-  position: number;
-  character: string;
-  version: number;
+  position: number;    // The index where the change occurs
+  character: string;   // The text being inserted or deleted
+  version: number;     // The base version this operation was created on
   id?: string;
 }
 
+/**
+ * Applies a single OT operation to a string content.
+ * @param content - Current document content.
+ * @param op - The operation to apply.
+ * @returns The updated content.
+ */
 export const applyOperation = (content: string, op: Operation | null) => {
   if (!op) return content;
   
@@ -17,7 +26,13 @@ export const applyOperation = (content: string, op: Operation | null) => {
   return content;
 };
 
-// Generates an operation from a string change natively (simplistic diffing)
+/**
+ * Generates an operation by comparing two versions of a string (diffing).
+ * Optimized for single-contiguous-chunk changes typical in text editors.
+ * @param oldStr - Content before the change.
+ * @param newStr - Content after the change.
+ * @param version - The base version for the generated operation.
+ */
 export const computeOperation = (oldStr: string, newStr: string, version: number) => {
   // Find start index where they differ
   let start = 0;
@@ -33,28 +48,27 @@ export const computeOperation = (oldStr: string, newStr: string, version: number
     newEnd--;
   }
 
-  // If we just inserted text
+  // If text was inserted
   if (oldEnd < start && newEnd >= start) {
     return {
-      type: 'insert',
+      type: 'insert' as const,
       position: start,
       character: newStr.substring(start, newEnd + 1),
       version
     };
   }
   
-  // If we just deleted text
+  // If text was deleted
   if (newEnd < start && oldEnd >= start) {
     return {
-      type: 'delete',
+      type: 'delete' as const,
       position: start,
       character: oldStr.substring(start, oldEnd + 1),
       version
     };
   }
 
-  // Replacement (delete then insert). MVP handles this as two ops or single chunk. We'll return null for complex scenarios in this basic version, but standard JS inputs usually are contiguous.
-  // We'll treat standard single char replace as a delete + insert, but we can only return one here natively.
-  // In a robust system, we would return [] array of ops. For this MVP, if it's complex, we just fallback.
+  // If both start/end diffed (Replacement), it's complex for this basic OT model.
+  // Standard keystrokes are handled above.
   return null;
 };
