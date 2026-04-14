@@ -1,190 +1,94 @@
-# SyncScript 📝
+# SyncScript 📝 - Project Title and Overview
 
-A real-time collaborative document editor built with Node.js, Express, Socket.io, MongoDB, and React.
-
-## 🚀 Overview
-SyncScript allows multiple users to edit the same document simultaneously with conflict resolution using **Operational Transformation (OT)**.
+**SyncScript** is a real-time collaborative document editor that allows multiple users to view and edit the same document simultaneously, similar to Google Docs. It handles real-time synchronization out-of-the-box and features robust conflict resolution utilizing **Operational Transformation (OT)**.
 
 ---
 
-## 🏗️ Architecture & Design Patterns
+## Tech Stack
 
-The project follows a modular architecture utilizing several classic design patterns to ensure scalability and maintainability. For a complete technical visual, see the [Detailed UML Class Diagram](file:///Users/sahilchand/Desktop/SyncScript/UML_DIAGRAM.md).
+Here are the languages, frameworks, databases, and tools used in this project:
 
-### 1. Observer Pattern
-Used for real-time synchronization between the server and multiple clients.
-- **Subject**: `DocumentSubject` (manages documentation state and history).
-- **Observer**: Individual WebSocket connections (clients).
-- **Manager**: `DocumentManager` acts as a **Subject Pool** (or Factory), ensuring that each document has exactly one subject instance in memory.
-
-### 2. Strategy Pattern
-The Operational Transformation (OT) math is encapsulated within a separate context.
-- `OTContext` encapsulates the logic for transforming operations (e.g., `catchUp`).
-- This allows the math logic to be swapped or updated without affecting the socket handling logic.
-
-### 3. Singleton Pattern
-- **Database**: The MongoDB connection is managed as a Singleton to prevent multiple redundant connections.
-- **Server Initialization**: The `AppServer` and `SocketManager` patterns ensure centralized control of the application lifecycle.
+- **Languages:** JavaScript, TypeScript, HTML5, CSS3
+- **Frontend Framework:** React (bootstrapped with Vite)
+- **Backend Framework:** Node.js, Express.js
+- **Database:** MongoDB (using Mongoose ODM)
+- **Real-time Tools:** Socket.io (for WebSocket communication)
 
 ---
 
-## 📊 Detailed UML Class Diagram
+## Architecture Explanation
 
-```mermaid
-classDiagram
-    direction TB
+The application follows a modular and event-driven architecture utilizing classic design patterns to ensure scalability, real-time sync, and maintainability. 
 
-    %% Backend Structure
-    class AppServer {
-        -app: Express
-        -server: HTTPServer
-        -io: SocketIO
-        -port: number
-        +initializeDependencies() Promise
-        +initializeMiddleware() void
-        +initializeRoutes() void
-        +initializeSockets() void
-        +start() void
-    }
+### Core Design Patterns Utilized:
+1. **Observer Pattern:** Facilitates real-time synchronization. `DocumentSubject` tracks document state and history, while individual WebSocket connections (clients) act as Observers.
+2. **Strategy Pattern:** Operational Transformation (OT) math logic is encapsulated inside `OTContext` utilizing different Transformation Strategies (`InsertStrategy` vs `DeleteStrategy`).
+3. **Singleton Pattern:** Used for MongoDB database connections and Server Initialization to ensure a single centralized point of control.
 
-    class SocketManager {
-        -io: SocketIO
-        -activeSockets: Map~string, string~
-        +handleConnection(socket: Socket) void
-        +handleJoinDocument(socket: Socket, documentId: string) Promise
-        +handleLeaveDocument(socket: Socket, documentId: string) void
-        +handleSendOperation(socket: Socket, data: any) Promise
-    }
-
-    class DocumentManager {
-        <<Singleton>>
-        -subjects: Map~string, DocumentSubject~
-        +getSubject(documentId: string) DocumentSubject
-        +destroySubject(documentId: string) void
-    }
-
-    class DocumentSubject {
-        +documentId: string
-        -observers: List~Socket~
-        -history: List~Operation~
-        +subscribe(observer: Socket) void
-        +unsubscribe(observer: Socket) void
-        +notifyOthers(skip: Socket, event: string, payload: any) void
-        +notifyDirect(observer: Socket, event: string, payload: any) void
-        +addHistory(op: Operation) void
-        +getHistory() Operation[]
-    }
-
-    %% OT Strategy Pattern
-    class OTContext {
-        <<Context>>
-        -strategies: Map~string, TransformStrategy~
-        +getStrategy(opType: string) TransformStrategy
-        +transform(newOp: Operation, pastOp: Operation) Operation
-        +catchUp(op: Operation, history: Operation[]) Operation
-        +applyOperation(content: string, op: Operation) string
-    }
-
-    class TransformStrategy {
-        <<Abstract>>
-        +transform(newOp: Operation, pastOp: Operation) Operation*
-        +apply(content: string, op: Operation) string*
-    }
-
-    class InsertStrategy {
-        +transform(newOp, pastOp) Operation
-        +apply(content, op) string
-    }
-
-    class DeleteStrategy {
-        +transform(newOp, pastOp) Operation
-        +apply(content, op) string
-    }
-
-    %% Database & Models
-    class DatabaseConnection {
-        <<Singleton>>
-        -instance: DatabaseConnection
-        -connection: Mongoose
-        +getInstance() DatabaseConnection
-        +connect() Promise~Mongoose~
-    }
-
-    class DocumentModel {
-        <<Mongoose Model>>
-        +documentId: string
-        +data: string
-        +version: number
-        +timestamps: true
-    }
-
-    %% Data Structures
-    class Operation {
-        <<Interface>>
-        +type: "insert" | "delete"
-        +position: number
-        +character: string
-        +version: number
-    }
-
-    %% Relationships
-    AppServer *-- SocketManager : composition (1:1)
-    SocketManager --> DocumentManager : uses
-    DocumentManager "1" o-- "*" DocumentSubject : aggregates (subject pool)
-    DocumentSubject "1" o-- "*" Operation : contains (history)
-    SocketManager ..> OTContext : depends on (math)
-    SocketManager ..> DocumentModel : interacts with
-    
-    OTContext "1" *-- "2" TransformStrategy : composes (strategies)
-    TransformStrategy <|-- InsertStrategy : inheritance
-    TransformStrategy <|-- DeleteStrategy : inheritance
-    
-    DatabaseConnection ..> DocumentModel : configures
-
-    %% Note
-    note for DocumentManager "Ensures one Subject per documentID"
-    note for OTContext "Strategy Pattern for OT Transformations"
-```
+### Data Flow Overview:
+1. **Trigger:** A user types a character in the React frontend.
+2. **Diffing:** Changes are diffed, and an operation (`insert` or `delete`) is generated.
+3. **Transmission:** The operation is emitted to the Node.js server via WebSockets (`Socket.io`).
+4. **Resolution:** The server receives the operation and runs it through `OTContext.catchUp` to resolve any conflicts against recent document history (OT logic).
+5. **Persistence:** The processed operation is applied to the MongoDB database.
+6. **Broadcasting:** The Server notifies all other connected clients about the transformation.
+7. **Client Application:** Connected clients apply the transformed operation to seamlessly update their screens without interrupting their own typing.
 
 ---
 
-## 🔄 Data Flow
-
-1. **User Input**: A user types a character in the React frontend.
-2. **Diffing**: `computeOperation` identifies the change and creates an `insert` or `delete` operation.
-3. **Emit**: The client emits `send-operation` via Socket.io.
-4. **Transform**: The server receives the operation and uses `OTContext.catchUp` to transform it against any missed history.
-5. **Persist**: The transformed operation is applied to the MongoDB database.
-6. **Notify**: The `DocumentSubject` notifies all other "Observers" (clients) in that room with the transformed operation.
-7. **Apply**: Other clients receive the operation and call `applyOperation` to update their local text view.
-
----
-
-## 🛠️ Tech Stack
-- **Frontend**: React, TypeScript, Vite, CSS3
-- **Backend**: Node.js, Express, Socket.io
-- **Database**: MongoDB (Mongoose)
-
----
-
-## 🚦 Getting Started
+## Setup and Installation Instructions
 
 ### Prerequisites
-- Node.js (v18+)
-- MongoDB (Running locally or via Atlas)
+Before you start, ensure you have the following installed:
+- Node.js (v18 or higher recommended)
+- MongoDB (Running locally via MongoDB Compass, or a MongoDB Atlas cloud cluster URI)
 
-### Installation
-1. Clone the repository.
-2. Install dependencies:
+### Installation Steps
+
+1. **Clone the repository** to your local machine:
+   ```bash
+   git clone <your-repository-url>
+   cd SyncScript
+   ```
+
+2. **Install frontend dependencies**:
    ```bash
    npm install
-   cd server && npm install
    ```
-3. Set up `.env` files in both root and `server` directories.
-4. Run the application:
+
+3. **Install backend dependencies**:
    ```bash
-   # In root
-   npm run dev
-   # In server directory
-   node server.js
+   cd server
+   npm install
    ```
+
+4. **Environment Configuration**:
+   - Create a `.env` file in the `server` directory containing your MongoDB Connection string and desired port:
+     ```env
+     PORT=5000
+     MONGODB_URI=mongodb://localhost:27017/syncscript
+     ```
+
+---
+
+## How to Run the Project
+
+You will need to run the application using two separate terminal instances—one for the backend and one for the frontend.
+
+**1. Start the Backend Server**
+Open a terminal, navigate to the `server` directory, and start the backend:
+```bash
+cd server
+npm start
+# OR node server.js
+```
+
+**2. Start the Frontend Application**
+Open a new terminal window, navigate to the root directory `SyncScript`, and start the Vite development server:
+```bash
+npm run dev
+```
+
+**3. Test the Setup**
+- Open your browser and navigate to `http://localhost:5173` (or the local link provided by Vite).
+- Open the application in multiple tabs or browsers using the **same document ID/URL** to test the collaborative real-time editing features!
