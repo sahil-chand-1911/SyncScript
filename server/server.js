@@ -10,8 +10,22 @@ const authRoutes = require('./routes/authRoutes');
 const setupSockets = require('./sockets/documentSocket');
 
 /**
- * Main application server class that bootstraps the Express application,
- * HTTP server, Socket.io, and Database connections.
+ * AppServer — Main Application Bootstrap.
+ *
+ * Orchestrates the initialization of all application layers:
+ *   1. Database connection (Singleton)
+ *   2. Express middleware (CORS, JSON parsing)
+ *   3. RESTful API routes (Auth, Documents)
+ *   4. WebSocket layer (Socket.IO + SocketManager)
+ *
+ * SOLID Principles:
+ *   - Single Responsibility: Only handles server bootstrapping.
+ *     Business logic lives in controllers/services.
+ *   - Dependency Inversion: Depends on abstractions (route modules,
+ *     setup functions) rather than concrete implementations.
+ *
+ * Design Pattern: Composition Root — this is the single entry point
+ * where all dependencies are wired together.
  */
 class AppServer {
   constructor() {
@@ -32,27 +46,28 @@ class AppServer {
   }
 
   /**
-   * Initializes external dependencies like the Database.
-   * Follows the Singleton pattern via DatabaseConnection.
+   * Initializes external dependencies (database).
+   * Uses the Singleton DatabaseConnection to prevent duplicate pools.
    */
   async initializeDependencies() {
-    // Uses the Singleton db
     await DatabaseConnection.connect();
   }
 
   /**
-   * Configures Express middleware including CORS and JSON parsing.
+   * Configures Express middleware stack.
+   * Order matters: CORS → JSON parsing → routes.
    */
   initializeMiddleware() {
     this.app.use(cors({
       origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-      methods: ['GET', 'POST']
+      methods: ['GET', 'POST', 'DELETE']
     }));
     this.app.use(express.json());
   }
 
   /**
-   * Sets up RESTful API routes.
+   * Mounts RESTful API route modules.
+   * Each route module encapsulates its own controller logic.
    */
   initializeRoutes() {
     this.app.use('/api/auth', authRoutes);
@@ -64,7 +79,12 @@ class AppServer {
   }
 
   /**
-   * Initializes WebSocket logic by passing the IO instance to the SocketManager.
+   * Initializes the WebSocket layer by passing the Socket.IO
+   * server to the SocketManager factory function.
+   *
+   * SCALING NOTE: To add Redis adapter for multi-server support:
+   *   const { createAdapter } = require('@socket.io/redis-adapter');
+   *   this.io.adapter(createAdapter(pubClient, subClient));
    */
   initializeSockets() {
     setupSockets(this.io);
@@ -80,6 +100,6 @@ class AppServer {
   }
 }
 
-// Bootstrap
+// Bootstrap the application
 const bootServer = new AppServer();
 bootServer.start();
