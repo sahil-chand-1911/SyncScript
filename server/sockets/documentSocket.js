@@ -1,6 +1,7 @@
 const Document = require('../models/Document');
 const OTContext = require('../utils/ot');
 const DocumentManager = require('../services/DocumentSubject');
+const { socketAuthMiddleware } = require('../middleware/authMiddleware');
 
 /**
  * Manages WebSocket connections and orchestrates the synchronization flow.
@@ -11,6 +12,9 @@ class SocketManager {
     this.io = io;
     this.activeSockets = new Map(); // Keep track of which room a socket is in
     
+    // Apply JWT authentication middleware to all socket connections
+    this.io.use(socketAuthMiddleware);
+    
     this.io.on('connection', (socket) => this.handleConnection(socket));
   }
 
@@ -18,7 +22,7 @@ class SocketManager {
    * Registers primary socket event listeners upon connection.
    */
   handleConnection(socket) {
-    console.log('User connected:', socket.id);
+    console.log(`User connected: ${socket.user.name} (${socket.id})`);
 
     socket.on('join-document', async (documentId) => {
       this.handleJoinDocument(socket, documentId);
@@ -29,7 +33,21 @@ class SocketManager {
     });
 
     socket.on('send-operation', async (data) => {
-      this.handleSendOperation(socket, data);
+      console.log(`[Socket] Received send-operation from ${socket.id}`, data.operation);
+      try {
+        await this.handleSendOperation(socket, data);
+      } catch (err) {
+        console.error(`[Socket Error] handleSendOperation failed:`, err);
+      }
+    });
+
+    socket.on('send-changes', async (data) => {
+      console.log(`[Socket] Received send-changes from ${socket.id}`);
+      try {
+        await this.handleSendChanges(socket, data);
+      } catch (err) {
+        console.error(`[Socket Error] handleSendChanges failed:`, err);
+      }
     });
 
     socket.on('disconnect', () => {
@@ -114,7 +132,32 @@ class SocketManager {
         // Notify Observers directly
         subject.notifyDirect(socket, 'operation-acknowledged', nextVersion);
         subject.notifyOthers(socket, 'receive-operation', transformedOp);
+        console.log(`[Socket] Broadcasted receive-operation to room ${documentId}`);
       }
+    }
+  }
+
+  /**
+   * Processes a massive fallback operational change (like a massive copy/paste).
+   * Overrides the current document content entirely.
+   */
+  async handleSendChanges(socket, data) {
+    const { documentId, content } = data;
+    const document = await Document.findOne({ documentId });
+    if (document) {
+      const nextVersion = document.version + 1;
+      await Document.findOneAndUpdate(
+        { documentId }, 
+        { data: content, version: nextVersion }
+      );
+      
+      const subject = DocumentManager.getSubject(documentId);
+      // We clear the history to avoid invalidating new operations against an old context pool
+      subject.history = []; 
+      
+      subject.notifyDirect(socket, 'operation-acknowledged', nextVersion);
+      subject.notifyOthers(socket, 'receive-changes', content);
+      console.log(`[Socket] Broadcasted receive-changes to room ${documentId}`);
     }
   }
 }

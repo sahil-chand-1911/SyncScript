@@ -6,6 +6,7 @@ const { Server } = require('socket.io');
 
 const DatabaseConnection = require('./config/db');
 const documentRoutes = require('./routes/documentRoutes');
+const authRoutes = require('./routes/authRoutes');
 const setupSockets = require('./sockets/documentSocket');
 
 /**
@@ -54,6 +55,7 @@ class AppServer {
    * Sets up RESTful API routes.
    */
   initializeRoutes() {
+    this.app.use('/api/auth', authRoutes);
     this.app.use('/api/documents', documentRoutes);
 
     this.app.get('/', (req, res) => {
