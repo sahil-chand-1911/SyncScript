@@ -54,6 +54,9 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
   const [documentId, setDocumentId] = useState('default-doc');
   const [activeDocId, setActiveDocId] = useState('default-doc');
 
+  // Connection status
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected');
+
   // Version History States
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [versionsList, setVersionsList] = useState<DocumentVersion[]>([]);
@@ -74,6 +77,10 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
   const isViewer = userRole === 'viewer';
   const isOwner = userRole === 'owner';
 
+  // Document stats
+  const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+  const charCount = content.length;
+
   useEffect(() => {
     contentRef.current = content;
   }, [content]);
@@ -93,11 +100,21 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
 
     s.on('connect', () => {
       console.log('Connected to server (authenticated)');
+      setConnectionStatus('connected');
       s.emit('join-document', activeDocId);
+    });
+
+    s.on('disconnect', () => {
+      setConnectionStatus('disconnected');
+    });
+
+    s.io.on('reconnect_attempt', () => {
+      setConnectionStatus('reconnecting');
     });
 
     s.on('connect_error', (err) => {
       console.error('Socket connection error:', err.message);
+      setConnectionStatus('disconnected');
       if (err.message.includes('Authentication')) {
         onLogout();
       }
@@ -171,6 +188,10 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
       socket?.emit('leave-document', activeDocId);
       setActiveDocId(documentId);
     }
+  };
+
+  const handleDocIdKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleJoin();
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -348,11 +369,21 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
     return <span className={info.className}>{info.text}</span>;
   };
 
+  const connectionLabel = {
+    connected: { text: 'Connected', className: 'status-connected' },
+    disconnected: { text: 'Disconnected', className: 'status-disconnected' },
+    reconnecting: { text: 'Reconnecting...', className: 'status-reconnecting' },
+  }[connectionStatus];
+
   return (
     <div className="app-container">
       <div className="editor-header">
         <h1>📝 SyncScript</h1>
         <div className="user-info">
+          <span className={`connection-status ${connectionLabel.className}`}>
+            <span className="status-indicator"></span>
+            {connectionLabel.text}
+          </span>
           {getRoleBadge()}
           <span className="user-badge">{user.name}</span>
           <button onClick={handleLogout} className="logout-btn">
@@ -366,6 +397,7 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
           type="text"
           value={documentId}
           onChange={(e) => setDocumentId(e.target.value)}
+          onKeyDown={handleDocIdKeyDown}
           placeholder="Enter Document ID"
           className="doc-input"
         />
@@ -448,6 +480,13 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
             </>
           )}
         </div>
+      </div>
+
+      {/* Status Bar */}
+      <div className="status-bar">
+        <span className="status-bar-item">{wordCount} words</span>
+        <span className="status-bar-item">{charCount} characters</span>
+        <span className="status-bar-item">v{versionRef.current}</span>
       </div>
 
       {/* Version History Modal */}
