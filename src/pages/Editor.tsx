@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { computeOperation, applyOperation, Operation } from '../utils/otLogic';
+import type { Operation } from '../utils/otLogic';
+import { computeOperation, applyOperation } from '../utils/otLogic';
 
 const SOCKET_SERVER_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
