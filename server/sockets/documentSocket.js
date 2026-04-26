@@ -51,7 +51,7 @@ class SocketManager {
     });
 
     socket.on('disconnect', () => {
-      console.log('User disconnected:', socket.id);
+      console.log(`User disconnected: ${socket.user?.name || socket.id}`);
       const currentDocId = this.activeSockets.get(socket.id);
       if (currentDocId) {
         this.handleLeaveDocument(socket, currentDocId);

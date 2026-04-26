@@ -4,6 +4,12 @@ import { computeOperation, applyOperation } from '../utils/otLogic';
 
 const SOCKET_SERVER_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
+interface ActiveUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
 interface EditorProps {
   token: string;
   user: { name: string; email: string };
@@ -12,11 +18,13 @@ interface EditorProps {
 
 /**
  * Editor Page Component.
- * Manages local state, authenticated socket connections, and OT synchronization.
+ * Manages local state, authenticated socket connections, OT synchronization,
+ * and real-time active user presence tracking.
  */
 export default function Editor({ token, user, onLogout }: EditorProps) {
   const [content, setContent] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
 
   const [documentId, setDocumentId] = useState('default-doc');
   const [activeDocId, setActiveDocId] = useState('default-doc');
@@ -36,7 +44,7 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
   /**
    * WebSocket Connection Lifecycle:
    * 1. Connects to the backend with JWT auth token.
-   * 2. Registers listeners for OT operations and administrative events.
+   * 2. Registers listeners for OT operations, presence events, and admin events.
    * 3. Handles cleanup on unmount or room change.
    */
   useEffect(() => {
@@ -65,20 +73,30 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
       versionRef.current = data.version;
     });
 
-    // Handle incoming operations from other clients
+    // ---- Presence Events ----
+    s.on('active-users', (users: ActiveUser[]) => {
+      setActiveUsers(users);
+    });
+
+    s.on('user-joined', (joinedUser: { name: string }) => {
+      console.log(`${joinedUser.name} joined the document`);
+    });
+
+    s.on('user-left', (leftUser: { name: string }) => {
+      console.log(`${leftUser.name} left the document`);
+    });
+
+    // ---- OT Events ----
     s.on('receive-operation', (op) => {
-      // Apply the remote operation to the local text pool
       const updatedContent = applyOperation(contentRef.current, op);
       setContent(updatedContent);
       versionRef.current = op.version;
     });
 
-    // Server acknowledgment of a locally sent operation
     s.on('operation-acknowledged', (newVersion) => {
       versionRef.current = newVersion;
     });
 
-    // Fail-safe fallback listener for full content sync
     s.on('receive-changes', (newContent) => {
       setContent(newContent);
     });
@@ -126,6 +144,21 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
     onLogout();
   };
 
+  /**
+   * Generates a consistent color for a user's avatar based on their name.
+   */
+  const getAvatarColor = (name: string) => {
+    const colors = [
+      '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b',
+      '#10b981', '#06b6d4', '#f97316', '#ef4444',
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
+  };
+
   return (
     <div className="app-container">
       <div className="editor-header">
@@ -154,12 +187,38 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
         </span>
       </div>
 
-      <textarea
-        value={content}
-        onChange={handleChange}
-        placeholder="Start typing..."
-        className="editor-textarea"
-      />
+      <div className="editor-layout">
+        <textarea
+          value={content}
+          onChange={handleChange}
+          placeholder="Start typing..."
+          className="editor-textarea"
+        />
+
+        {/* Active Users Sidebar */}
+        <div className="presence-panel">
+          <div className="presence-header">
+            <span className="presence-dot"></span>
+            Online — {activeUsers.length}
+          </div>
+          <ul className="presence-list">
+            {activeUsers.map((u) => (
+              <li key={u.id} className="presence-user">
+                <span
+                  className="presence-avatar"
+                  style={{ backgroundColor: getAvatarColor(u.name) }}
+                >
+                  {u.name.charAt(0).toUpperCase()}
+                </span>
+                <span className="presence-name">
+                  {u.name}
+                  {u.email === user.email && <span className="presence-you"> (you)</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
     </div>
   );
 }
