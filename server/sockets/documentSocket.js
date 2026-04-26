@@ -1,7 +1,11 @@
 const Document = require('../models/Document');
+const DocumentVersion = require('../models/DocumentVersion');
 const OTContext = require('../utils/ot');
 const DocumentManager = require('../services/DocumentSubject');
 const { socketAuthMiddleware } = require('../middleware/authMiddleware');
+
+// Save a version snapshot every N operations
+const SNAPSHOT_INTERVAL = 10;
 
 /**
  * Manages WebSocket connections and orchestrates the synchronization flow.
@@ -62,7 +66,7 @@ class SocketManager {
 
   /**
    * Handles a client joining a specific document room.
-   * Subscribes the socket to the DocumentSubject (Observer Pattern).
+   * Checks permissions and sends the user's role to the client.
    * @param {Socket} socket - The Socket.io instance.
    * @param {string} documentId - The unique ID of the document.
    */
@@ -78,15 +82,28 @@ class SocketManager {
     subject.subscribe(socket);
     
     this.activeSockets.set(socket.id, documentId);
-    socket.join(documentId); // We still use native channels to group traffic natively
+    socket.join(documentId);
 
     let document = await Document.findOne({ documentId });
     if (!document) {
-      document = await Document.create({ documentId, data: '', version: 1 });
+      // First user to create this document becomes the owner
+      document = await Document.create({ 
+        documentId, 
+        data: '', 
+        version: 1,
+        owner: socket.user.id,
+      });
     }
 
-    // Direct initial payload
-    socket.emit('load-document', { content: document.data, version: document.version });
+    // Determine the user's role for this document
+    const role = document.getUserRole(socket.user.id);
+
+    // Send initial payload with role information
+    socket.emit('load-document', { 
+      content: document.data, 
+      version: document.version,
+      role: role || 'viewer', // Default to viewer if no explicit access
+    });
   }
 
   /**
@@ -109,6 +126,16 @@ class SocketManager {
    */
   async handleSendOperation(socket, data) {
     const { documentId, operation } = data;
+
+    // Permission check: viewers cannot edit
+    const doc = await Document.findOne({ documentId });
+    if (doc) {
+      const role = doc.getUserRole(socket.user.id);
+      if (role === 'viewer') {
+        socket.emit('permission-denied', { message: 'You have view-only access to this document' });
+        return;
+      }
+    }
 
     // Stamp authenticated user identity and timestamp onto the operation
     operation.userId = socket.user.id;
@@ -136,6 +163,18 @@ class SocketManager {
 
         subject.addHistory(transformedOp);
 
+        // Auto-save version snapshot at regular intervals
+        if (nextVersion % SNAPSHOT_INTERVAL === 0) {
+          await DocumentVersion.create({
+            documentId,
+            version: nextVersion,
+            content: newContent,
+            savedBy: { userId: socket.user.id, userName: socket.user.name },
+            label: 'Auto-save',
+          }).catch(err => console.error('[Version] Snapshot save failed:', err.message));
+          console.log(`[Version] Auto-saved snapshot v${nextVersion} for ${documentId}`);
+        }
+
         // Notify Observers directly
         subject.notifyDirect(socket, 'operation-acknowledged', nextVersion);
         subject.notifyOthers(socket, 'receive-operation', transformedOp);
@@ -153,11 +192,27 @@ class SocketManager {
     const { documentId, content } = data;
     const document = await Document.findOne({ documentId });
     if (document) {
+      // Permission check: viewers cannot edit
+      const role = document.getUserRole(socket.user.id);
+      if (role === 'viewer') {
+        socket.emit('permission-denied', { message: 'You have view-only access to this document' });
+        return;
+      }
+
       const nextVersion = document.version + 1;
       await Document.findOneAndUpdate(
         { documentId }, 
         { data: content, version: nextVersion }
       );
+
+      // Always snapshot on full-content changes (significant edits)
+      await DocumentVersion.create({
+        documentId,
+        version: nextVersion,
+        content,
+        savedBy: { userId: socket.user.id, userName: socket.user.name },
+        label: 'Full replace',
+      }).catch(err => console.error('[Version] Snapshot save failed:', err.message));
       
       const subject = DocumentManager.getSubject(documentId);
       // We clear the history to avoid invalidating new operations against an old context pool
