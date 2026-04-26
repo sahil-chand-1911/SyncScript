@@ -446,6 +446,7 @@ The following UML diagrams are included in the `/docs` folder to illustrate the 
 | [Team Member 2] | Backend Developer | OT engine, WebSocket layer, document state management |
 | [Team Member 3] | Frontend Developer | Editor UI, presence sidebar, version history modal |
 | [Team Member 4] | Architecture / DevOps | EventBus, scalability design, documentation |
+| [Team Member 5] | Testing / QA | Test cases, bug fixes, code review, deployment support |
 
 ---
 
