@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { computeOperation, applyOperation } from '../utils/otLogic';
+import { computeOperation, applyOperation, Operation } from '../utils/otLogic';
 
 const SOCKET_SERVER_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
@@ -10,21 +10,31 @@ interface ActiveUser {
   email: string;
 }
 
+interface EditHistoryEntry {
+  userName: string;
+  type: 'insert' | 'delete' | 'replace';
+  preview: string;
+  timestamp: number;
+}
+
 interface EditorProps {
   token: string;
   user: { name: string; email: string };
   onLogout: () => void;
 }
 
+const MAX_HISTORY_ENTRIES = 30;
+
 /**
  * Editor Page Component.
  * Manages local state, authenticated socket connections, OT synchronization,
- * and real-time active user presence tracking.
+ * real-time active user presence tracking, and edit history attribution.
  */
 export default function Editor({ token, user, onLogout }: EditorProps) {
   const [content, setContent] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
+  const [editHistory, setEditHistory] = useState<EditHistoryEntry[]>([]);
 
   const [documentId, setDocumentId] = useState('default-doc');
   const [activeDocId, setActiveDocId] = useState('default-doc');
@@ -34,12 +44,17 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
 
   /**
    * Syncs the mutable contentRef with the React content state.
-   * This is necessary because socket listeners need access to the latest content
-   * without being recreated on every render.
    */
   useEffect(() => {
     contentRef.current = content;
   }, [content]);
+
+  /**
+   * Adds an entry to the edit history feed (capped at MAX_HISTORY_ENTRIES).
+   */
+  const addHistoryEntry = (entry: EditHistoryEntry) => {
+    setEditHistory((prev) => [entry, ...prev].slice(0, MAX_HISTORY_ENTRIES));
+  };
 
   /**
    * WebSocket Connection Lifecycle:
@@ -48,7 +63,6 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
    * 3. Handles cleanup on unmount or room change.
    */
   useEffect(() => {
-    // Initialize Socket connection WITH authentication
     const s = io(SOCKET_SERVER_URL, {
       auth: { token },
     });
@@ -62,7 +76,6 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
     s.on('connect_error', (err) => {
       console.error('Socket connection error:', err.message);
       if (err.message.includes('Authentication')) {
-        // Token is invalid or expired, force logout
         onLogout();
       }
     });
@@ -71,6 +84,7 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
     s.on('load-document', (data) => {
       setContent(data.content);
       versionRef.current = data.version;
+      setEditHistory([]); // Clear history on room switch
     });
 
     // ---- Presence Events ----
@@ -86,19 +100,37 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
       console.log(`${leftUser.name} left the document`);
     });
 
-    // ---- OT Events ----
-    s.on('receive-operation', (op) => {
+    // ---- OT Events (with user attribution) ----
+    s.on('receive-operation', (op: Operation) => {
       const updatedContent = applyOperation(contentRef.current, op);
       setContent(updatedContent);
       versionRef.current = op.version;
+
+      // Record in edit history
+      if (op.userName) {
+        addHistoryEntry({
+          userName: op.userName,
+          type: op.type,
+          preview: op.character.length > 20 ? op.character.slice(0, 20) + '…' : op.character,
+          timestamp: op.timestamp || Date.now(),
+        });
+      }
     });
 
     s.on('operation-acknowledged', (newVersion) => {
       versionRef.current = newVersion;
     });
 
-    s.on('receive-changes', (newContent) => {
-      setContent(newContent);
+    s.on('receive-changes', (data: { content: string; userName: string; timestamp: number }) => {
+      setContent(data.content);
+      if (data.userName) {
+        addHistoryEntry({
+          userName: data.userName,
+          type: 'replace',
+          preview: 'Full document update',
+          timestamp: data.timestamp || Date.now(),
+        });
+      }
     });
 
     return () => {
@@ -107,8 +139,7 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
   }, [activeDocId, token]);
 
   /**
-   * Room Swapping Logic:
-   * Exits the current document and joins a new one.
+   * Room Swapping Logic.
    */
   const handleJoin = () => {
     if (documentId.trim() !== '' && documentId !== activeDocId) {
@@ -119,23 +150,31 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
 
   /**
    * Change Handler (Critical Sync Point):
-   * 1. Computes the diff (Operation) between the old and new text.
-   * 2. Updates local state immediately for responsiveness.
-   * 3. Broadcasts the Operation to the server for distribution.
+   * Records local edits in the history feed as well.
    */
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
-
-    // Compute the delta Operation
     const op = computeOperation(contentRef.current, newValue, versionRef.current);
 
     setContent(newValue);
 
     if (socket && op) {
       socket.emit('send-operation', { documentId: activeDocId, operation: op });
+      // Track own edit locally
+      addHistoryEntry({
+        userName: user.name,
+        type: op.type,
+        preview: op.character.length > 20 ? op.character.slice(0, 20) + '…' : op.character,
+        timestamp: Date.now(),
+      });
     } else if (socket && !op) {
-      // Fallback for complex changes (e.g., massive copy-paste)
       socket.emit('send-changes', { documentId: activeDocId, content: newValue });
+      addHistoryEntry({
+        userName: user.name,
+        type: 'replace',
+        preview: 'Full document update',
+        timestamp: Date.now(),
+      });
     }
   };
 
@@ -145,7 +184,7 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
   };
 
   /**
-   * Generates a consistent color for a user's avatar based on their name.
+   * Generates a consistent color for a user based on their name.
    */
   const getAvatarColor = (name: string) => {
     const colors = [
@@ -157,6 +196,17 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
       hash = name.charCodeAt(i) + ((hash << 5) - hash);
     }
     return colors[Math.abs(hash) % colors.length];
+  };
+
+  /**
+   * Formats a timestamp into a human-readable relative time string.
+   */
+  const formatTime = (ts: number) => {
+    const diff = Math.floor((Date.now() - ts) / 1000);
+    if (diff < 5) return 'just now';
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    return `${Math.floor(diff / 3600)}h ago`;
   };
 
   return (
@@ -195,8 +245,9 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
           className="editor-textarea"
         />
 
-        {/* Active Users Sidebar */}
+        {/* Sidebar: Active Users + Edit History */}
         <div className="presence-panel">
+          {/* Active Users Section */}
           <div className="presence-header">
             <span className="presence-dot"></span>
             Online — {activeUsers.length}
@@ -217,6 +268,31 @@ export default function Editor({ token, user, onLogout }: EditorProps) {
               </li>
             ))}
           </ul>
+
+          {/* Edit History Section */}
+          {editHistory.length > 0 && (
+            <>
+              <div className="history-header">Recent Edits</div>
+              <ul className="history-list">
+                {editHistory.map((entry, idx) => (
+                  <li key={idx} className="history-entry">
+                    <span
+                      className="history-dot"
+                      style={{ backgroundColor: getAvatarColor(entry.userName) }}
+                    ></span>
+                    <div className="history-content">
+                      <span className="history-user">{entry.userName}</span>
+                      <span className={`history-type history-type--${entry.type}`}>
+                        {entry.type === 'insert' ? '+ ' : entry.type === 'delete' ? '− ' : '⟲ '}
+                        <span className="history-preview">{entry.preview}</span>
+                      </span>
+                      <span className="history-time">{formatTime(entry.timestamp)}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       </div>
     </div>

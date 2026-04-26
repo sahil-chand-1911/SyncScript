@@ -1,5 +1,6 @@
 /**
  * Represents a single modification to a document.
+ * Extended with user identity for attribution tracking.
  */
 export interface Operation {
   type: 'insert' | 'delete';
@@ -7,6 +8,9 @@ export interface Operation {
   character: string;   // The text being inserted or deleted
   version: number;     // The base version this operation was created on
   id?: string;
+  userId?: string;     // The authenticated user who performed this operation
+  userName?: string;   // Display name of the user
+  timestamp?: number;  // Unix timestamp of when the operation was created
 }
 
 /**

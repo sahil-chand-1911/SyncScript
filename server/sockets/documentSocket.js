@@ -101,13 +101,20 @@ class SocketManager {
 
   /**
    * Processes an incoming Operational Transformation (OT) operation.
-   * 1. Fetches history from the Subject.
-   * 2. Transforms the operation against missed history (Strategy Pattern).
-   * 3. Persists the new state and history.
-   * 4. Notifies all observers (Observer Pattern).
+   * 1. Stamps user identity and timestamp onto the operation.
+   * 2. Fetches history from the Subject.
+   * 3. Transforms the operation against missed history (Strategy Pattern).
+   * 4. Persists the new state and history.
+   * 5. Notifies all observers (Observer Pattern).
    */
   async handleSendOperation(socket, data) {
     const { documentId, operation } = data;
+
+    // Stamp authenticated user identity and timestamp onto the operation
+    operation.userId = socket.user.id;
+    operation.userName = socket.user.name;
+    operation.timestamp = Date.now();
+
     const subject = DocumentManager.getSubject(documentId);
     const history = subject.getHistory();
 
@@ -132,7 +139,7 @@ class SocketManager {
         // Notify Observers directly
         subject.notifyDirect(socket, 'operation-acknowledged', nextVersion);
         subject.notifyOthers(socket, 'receive-operation', transformedOp);
-        console.log(`[Socket] Broadcasted receive-operation to room ${documentId}`);
+        console.log(`[Socket] Broadcasted receive-operation to room ${documentId} by ${socket.user.name}`);
       }
     }
   }
@@ -140,6 +147,7 @@ class SocketManager {
   /**
    * Processes a massive fallback operational change (like a massive copy/paste).
    * Overrides the current document content entirely.
+   * Stamps user identity for attribution.
    */
   async handleSendChanges(socket, data) {
     const { documentId, content } = data;
@@ -156,8 +164,13 @@ class SocketManager {
       subject.history = []; 
       
       subject.notifyDirect(socket, 'operation-acknowledged', nextVersion);
-      subject.notifyOthers(socket, 'receive-changes', content);
-      console.log(`[Socket] Broadcasted receive-changes to room ${documentId}`);
+      subject.notifyOthers(socket, 'receive-changes', {
+        content,
+        userId: socket.user.id,
+        userName: socket.user.name,
+        timestamp: Date.now(),
+      });
+      console.log(`[Socket] Broadcasted receive-changes to room ${documentId} by ${socket.user.name}`);
     }
   }
 }
