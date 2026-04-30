@@ -1,50 +1,50 @@
-const mongoose = require('mongoose');
+const { DataTypes, Model } = require('sequelize');
 const bcrypt = require('bcrypt');
 
-/**
- * User Schema for authentication.
- * Stores name, email, and a bcrypt-hashed password.
- */
-const userSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: [true, 'Name is required'],
-      trim: true,
-    },
-    email: {
-      type: String,
-      required: [true, 'Email is required'],
-      unique: true,
-      lowercase: true,
-      trim: true,
-    },
-    password: {
-      type: String,
-      required: [true, 'Password is required'],
-      minlength: 6,
-    },
-  },
-  { timestamps: true }
-);
+module.exports = (sequelize) => {
+  class User extends Model {
+    async comparePassword(candidatePassword) {
+      return bcrypt.compare(candidatePassword, this.password);
+    }
+  }
 
-/**
- * Pre-save hook to hash the password before persisting.
- * Only hashes if the password field has been modified (avoids re-hashing on updates).
- */
-userSchema.pre('save', async function () {
-  if (!this.isModified('password')) return;
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-});
+  User.init(
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      email: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true,
+        validate: {
+          isEmail: true,
+        },
+      },
+      password: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+    },
+    {
+      sequelize,
+      modelName: 'User',
+      hooks: {
+        beforeSave: async (user) => {
+          if (user.changed('password')) {
+            const salt = await bcrypt.genSalt(10);
+            user.password = await bcrypt.hash(user.password, salt);
+          }
+        },
+      },
+    }
+  );
 
-/**
- * Instance method to compare a candidate password with the stored hash.
- * @param {string} candidatePassword - The plain-text password to verify.
- * @returns {Promise<boolean>} True if the password matches.
- */
-userSchema.methods.comparePassword = async function (candidatePassword) {
-  return bcrypt.compare(candidatePassword, this.password);
+  return User;
 };
-
-module.exports = mongoose.model('User', userSchema);

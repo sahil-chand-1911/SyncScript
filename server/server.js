@@ -51,6 +51,9 @@ class AppServer {
    */
   async initializeDependencies() {
     await DatabaseConnection.connect();
+    const { sequelize } = require('./models');
+    await sequelize.sync({ alter: true });
+    console.log('Sequelize models synchronized.');
   }
 
   /**

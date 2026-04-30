@@ -1,49 +1,46 @@
 const { DataTypes, Model } = require('sequelize');
 
 module.exports = (sequelize) => {
-  class DocumentVersion extends Model {}
+  class Collaborator extends Model {}
 
-  DocumentVersion.init(
+  Collaborator.init(
     {
       id: {
         type: DataTypes.UUID,
         defaultValue: DataTypes.UUIDV4,
         primaryKey: true,
       },
+      userId: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
       documentId: {
         type: DataTypes.STRING,
         allowNull: false,
       },
-      version: {
-        type: DataTypes.INTEGER,
+      email: {
+        type: DataTypes.STRING,
         allowNull: false,
       },
-      content: {
-        type: DataTypes.TEXT,
-        defaultValue: '',
-      },
-      savedByUserId: {
+      name: {
         type: DataTypes.STRING,
       },
-      savedByUserName: {
-        type: DataTypes.STRING,
-      },
-      label: {
-        type: DataTypes.STRING,
-        defaultValue: '',
+      role: {
+        type: DataTypes.ENUM('editor', 'viewer'),
+        defaultValue: 'viewer',
       },
     },
     {
       sequelize,
-      modelName: 'DocumentVersion',
+      modelName: 'Collaborator',
       indexes: [
         {
           unique: true,
-          fields: ['documentId', 'version'],
+          fields: ['userId', 'documentId'],
         },
       ],
     }
   );
 
-  return DocumentVersion;
+  return Collaborator;
 };

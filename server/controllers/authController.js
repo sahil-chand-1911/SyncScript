@@ -1,12 +1,12 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const { User } = require('../models');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'syncscript_default_secret';
 const JWT_EXPIRES_IN = '7d';
 
 /**
  * Generates a signed JWT token for a given user ID.
- * @param {string} id - The MongoDB user ID.
+ * @param {string} id - The UUID user ID.
  * @returns {string} Signed JWT token.
  */
 const generateToken = (id) => {
@@ -22,25 +22,22 @@ const register = async (req, res) => {
   const { name, email, password } = req.body;
 
   try {
-    // Validate input
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Please provide name, email, and password' });
     }
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
 
-    // Create user (password is hashed via pre-save hook)
     const user = await User.create({ name, email, password });
 
     res.status(201).json({
-      _id: user._id,
+      _id: user.id, // Keeping _id format for frontend compatibility
       name: user.name,
       email: user.email,
-      token: generateToken(user._id),
+      token: generateToken(user.id),
     });
   } catch (error) {
     console.error('[Auth] Registration error:', error.message);
@@ -61,7 +58,7 @@ const login = async (req, res) => {
       return res.status(400).json({ message: 'Please provide email and password' });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ where: { email } });
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
@@ -72,10 +69,10 @@ const login = async (req, res) => {
     }
 
     res.json({
-      _id: user._id,
+      _id: user.id,
       name: user.name,
       email: user.email,
-      token: generateToken(user._id),
+      token: generateToken(user.id),
     });
   } catch (error) {
     console.error('[Auth] Login error:', error.message);
@@ -90,7 +87,7 @@ const login = async (req, res) => {
  */
 const getMe = async (req, res) => {
   res.json({
-    _id: req.user._id,
+    _id: req.user.id,
     name: req.user.name,
     email: req.user.email,
   });
