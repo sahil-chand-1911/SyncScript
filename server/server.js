@@ -33,7 +33,7 @@ class AppServer {
     this.server = http.createServer(this.app);
     this.io = new Server(this.server, {
       cors: {
-        origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+        origin: '*',
         methods: ['GET', 'POST']
       }
     });
@@ -62,7 +62,7 @@ class AppServer {
    */
   initializeMiddleware() {
     this.app.use(cors({
-      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+      origin: '*',
       methods: ['GET', 'POST', 'DELETE']
     }));
     this.app.use(express.json());
