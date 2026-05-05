@@ -29,10 +29,7 @@ class SocketManager {
     this.io.on('connection', (socket) => this.handleConnection(socket));
   }
 
-  /**
-   * Registers socket event listeners.
-   * Each handler is a thin wrapper that delegates to the state manager.
-   */
+
   handleConnection(socket) {
     console.log(`User connected: ${socket.user.name} (${socket.id})`);
 
